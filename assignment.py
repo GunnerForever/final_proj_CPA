@@ -44,7 +44,6 @@ def main(epochs):
     LOCAL_TEST_FILE = 'data/test'
 
     CLASSES = [3, 5]
-    # TODO: assignment.main() pt 1
     # Load testing and training data using the get_data function
 
     data = get_data(LOCAL_TRAIN_FILE, CLASSES)
@@ -55,11 +54,12 @@ def main(epochs):
     optimizer = tf.optimizers.Adam(0.003)
     # Train model
     for i in range(epochs):
-        train(model, optimizer, train_imps, train_labradors)
+        pass
+        #train(model, optimizer, train_imps, train_labradors)
     # Test model
-    acc = test(model, test_imps, test_labradors)
+    acc = -1 #test(model, test_imps, test_labradors)
     print("Final Acc: " + str(acc))
-    visualize_loss(model.loss_list)
+    #visualize_loss(model.loss_list)
     return 
 
 
