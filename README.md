@@ -1,4 +1,4 @@
-Later we can do a more formal version, for now we can just use this to right notes on ongoing bugs, trouble points, etc
+Later we can do a more formal version, for now we can just use this to write notes on ongoing bugs, trouble points, etc
 
 Right now, there should be a bunch of empty methods to fill in ourselves based on the actual implementation
 
