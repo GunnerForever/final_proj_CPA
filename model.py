@@ -1,79 +1,68 @@
 import numpy as np
 import tensorflow as tf
-from tensorflow import keras
-#@tf.keras.saving.register_keras_serializable(package="ImCapModel")
-class CpaModel(tf.keras.Model):
-    def __init__(self, decoder, embeddings, **kwargs):
+from keras import layers
+from encoder import CPAEncoder
+from decoder import CPADecoder
+from grad_reverse import GradientReversalLayer
+from discriminator import CPADiscriminator
+
+class CPAModel(tf.keras.Model):
+    def __init__(self, input_dim, latent_size, output_dim, enc_doc_hidden_size, dosage_enc_hidden_size,
+                 discriminator_hidden_size, num_perts, use_covariates=False, num_covs=0, **kwargs):
         super().__init__(**kwargs)
-        self.embeddings = embeddings
-        self.decoder = decoder
         
-    def call(self, cell_state, perts, covs):
-        #Get Z_basal, apply V_perturbations and V_covariates
-        basal_state, pert_embed, cov_embed = self.embeddings.call(cell_state, perts, covs)
+        self.encoder = CPAEncoder(input_dim, latent_size, enc_doc_hidden_size)
+        self.decoder = CPADecoder(latent_size, output_dim, enc_doc_hidden_size)
 
-        #Put them through the "composition" part of the autoencoder
-        composite = self.composition(basal_state, pert_embed, cov_embed)
+        self.pert_embeddings = self.add_weight(name='pert_embeddings', 
+                                               shape=(num_perts, latent_size), 
+                                               initializer="glorot_uniform",
+                                               trainable=True)
+        
+        if use_covariates:
+            self.cov_embeddings = self.add_weight(name='cov_embeddings', 
+                                                  shape=(num_covs, latent_size), 
+                                                  initializer="glorot_uniform",
+                                                  trainable=True)
+            
+        self.use_covariates = use_covariates
 
-        #Decode
-        return self.decoder(composite)  
-    
-    def call(self, cell_state, perts, covs, new_perts): #Function overloading for test case
-        #Get Z_basal, apply V_perturbations and V_covariates
-        basal_state, pert_embed, cov_embed = self.embeddings.call(cell_state, perts, covs)
+        self.dose_encoder = tf.keras.Sequential([
+            layers.InputLayer(input_shape=(1,)),
+            layers.Dense(dosage_enc_hidden_size, activation='relu', kernel_initializer='he_normal'),
+            layers.Dense(1, activation=None)
+        ])
 
-        #Put them through the "composition" part of the autoencoder
-        composite = self.composition(basal_state, pert_embed, new_perts)
+        self.pert_discriminator = CPADiscriminator(latent_size, num_perts, discriminator_hidden_size)
+        if use_covariates:
+            self.cov_discriminator = CPADiscriminator(latent_size, num_covs, discriminator_hidden_size)
+        else:
+            self.cov_discriminator = None
 
-        #Decode
-        return self.decoder(composite)  
-    
-    def composition(self, basal_state, pert_embed, cov_embed):
-        #I thought this was going to be more complex than it actually ended up being
-        composite = basal_state + pert_embed + cov_embed
-        return composite
+        self.GRL = GradientReversalLayer(lambda_=1.0)
+        
+        
+    def call(self, x, pert_idx, dose, cov_idx=None, training=False):
+        z_basal = self.encoder(x)
 
-    def compile(self, optimizer, loss, metrics):
-        '''
-        Create a facade to mimic normal keras fit routine
-        '''
-        self.optimizer = optimizer
-        self.loss_function = loss 
-        self.accuracy_function = metrics[0]
+        outputs = {}
 
-    def train(self, data, batch_size=10):
-        for index, end in enumerate(range(batch_size, len(data)+1, batch_size)):
-            ## Get batches of data, convert into (cell state, perturbations, covariates) triplets
-            cell_state, perts, covs = (-1, -1, -1)
+        if training:
+            reversed_z_basal = self.GRL(z_basal)
+            outputs["pert_pred"] = self.pert_discriminator(reversed_z_basal)
+            if self.use_covariates and cov_idx is not None:
+                outputs["cov_pred"] = self.cov_discriminator(reversed_z_basal)
+        
+        pert_vec = tf.nn.embedding_lookup(self.pert_embeddings, pert_idx)
+        scaled_dose = self.dose_encoder(tf.expand_dims(dose, axis=-1))
+        scaled_pert = tf.squeeze(scaled_dose, axis=-1)[:, tf.newaxis] * pert_vec
 
-            ## Perform a training forward pass. Make sure to factor out irrelevant labels.
-            with tf.GradientTape() as tape:
-                decoded_z = self(cell_state, perts, covs)
-                loss = self.loss_function(decoded_z)
+        z = z_basal + scaled_pert
+        if self.use_covariates and cov_idx is not None:
+            cov_vec = tf.nn.embedding_lookup(self.cov_embeddings, cov_idx)
+            z = z + cov_vec
+        
+        x_hat = self.decoder(z)
+        outputs["x_hat"] = x_hat
 
-            ## Perform a backwards pass
-            gradients = tape.gradient(loss, self.trainable_variables)
-            self.optimizer.apply_gradients(zip(gradients, self.trainable_variables))
-
-    def test(self, data, new_pertubations, batch_size=30):
-        #num_batches = int(len(test_captions) / batch_size)
-
-        total_loss = 0
-        for index, end in enumerate(range(batch_size, len(data)+1, batch_size)):
-            ## Get batches of data, convert into (cell state, perturbations, covariates) triplets and also get the extra pertubations data
-            cell_state, perts, covs = (-1, -1, -1)
-
-            ## Perform a no-training forward pass. Make sure to factor out irrelevant labels.
-            decoded_z = self(cell_state, perts, covs, new_pertubations)
-            #num_predictions = tf.reduce_sum(tf.cast(mask, tf.float32))
-            #loss = self.loss_function(probs, decoder_labels, mask)
-            #accuracy = self.accuracy_function(probs, decoder_labels, mask)
-
-            ## Compute and report on aggregated statistics
-            avg_acc = -1
-        return avg_acc
-
-
-    def loss_function(self, decoded_z):
-        loss = -1
-        return loss
+        return outputs

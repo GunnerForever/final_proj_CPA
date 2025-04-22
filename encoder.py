@@ -1,17 +1,18 @@
 import tensorflow as tf
 from keras import layers
 
-class CPADecoder(layers.Layer):
-    def __init__(self, input_dim, output_dim, hidden_size=512, **kwargs):
+class CPAEncoder(layers.Layer):
+    def __init__(self, input_dim, latent_size=256, hidden_size=512, **kwargs):
         super().__init__(**kwargs)
         
-        self.decoder = tf.keras.Sequential([
+        self.encoder = tf.keras.Sequential([
             layers.InputLayer(input_shape=(input_dim,)),
             layers.Dense(hidden_size, activation='relu', kernel_initializer='he_normal'),
             layers.Dense(hidden_size, activation='relu', kernel_initializer='he_normal'),
             layers.Dense(hidden_size, activation='relu', kernel_initializer='he_normal'),
-            layers.Dense(output_dim, activation=None)
+            layers.Dense(latent_size, activation=None)
         ])
         
     def call(self, x):
-        return self.decoder(x)
+        return self.encoder(x)
+
