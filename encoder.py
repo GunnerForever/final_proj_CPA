@@ -1,23 +1,24 @@
 import tensorflow as tf
 from keras import layers, regularizers, Model
 
-class CPADecoder(Model):
-    def __init__(self, input_dim, output_dim, hidden_size=512, **kwargs):
+class CPAEncoder(Model):
+    def __init__(self, input_dim: int, latent_size: int=256, hidden_size: int=512, **kwargs):
         super().__init__(**kwargs)
         
-        self.decoder = tf.keras.Sequential([
+        self.encoder = tf.keras.Sequential([
             layers.InputLayer(shape=(input_dim,)),
             # layers.Dense(hidden_size, kernel_initializer='he_normal', kernel_regularizer=regularizers.l2(1e-6)),
-            # layers.BatchNormalization(),
+            # layers.BatchNormalization(epsilon=1e-5, momentum=0.1),
             # layers.ReLU(),
             layers.Dense(hidden_size, kernel_initializer='he_normal', kernel_regularizer=regularizers.l2(1e-6)),
-            layers.BatchNormalization(),
+            layers.BatchNormalization(epsilon=1e-5, momentum=0.1),
             layers.ReLU(),
             layers.Dense(hidden_size, kernel_initializer='he_normal', kernel_regularizer=regularizers.l2(1e-6)),
-            layers.BatchNormalization(),
+            layers.BatchNormalization(epsilon=1e-5, momentum=0.1),
             layers.ReLU(),
-            layers.Dense(output_dim)
+            layers.Dense(latent_size)
         ])
         
     def call(self, x):
-        return self.decoder(x)
+        return self.encoder(x)
+
