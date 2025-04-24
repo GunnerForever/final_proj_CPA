@@ -7,12 +7,12 @@ from grad_reverse import GradientReversalLayer
 from discriminator import CPADiscriminator
 
 class CPAModel(tf.keras.Model):
-    def __init__(self, input_dim, latent_size, output_dim, enc_doc_hidden_size, dosage_enc_hidden_size,
+    def __init__(self, input_dim, latent_size, output_dim, enc_dec_hidden_size, dose_enc_hidden_size,
                  discriminator_hidden_size, num_perts, use_covariates=False, num_covs=0, **kwargs):
         super().__init__(**kwargs)
         
-        self.encoder = CPAEncoder(input_dim, latent_size, enc_doc_hidden_size)
-        self.decoder = CPADecoder(latent_size, output_dim, enc_doc_hidden_size)
+        self.encoder = CPAEncoder(input_dim, latent_size, enc_dec_hidden_size)
+        self.decoder = CPADecoder(latent_size, output_dim, enc_dec_hidden_size)
 
         self.pert_embeddings = self.add_weight(name='pert_embeddings', 
                                                shape=(num_perts, latent_size), 
@@ -28,8 +28,10 @@ class CPAModel(tf.keras.Model):
         self.use_covariates = use_covariates
 
         self.dose_encoder = tf.keras.Sequential([
-            layers.InputLayer(input_shape=(1,)),
-            layers.Dense(dosage_enc_hidden_size, activation='relu', kernel_initializer='he_normal'),
+            layers.InputLayer(shape=(1,)),
+            layers.Dense(dose_enc_hidden_size, kernel_initializer='he_normal', kernel_regularizer=tf.keras.regularizers.l2(1e-7)),
+            layers.BatchNormalization(),
+            layers.ReLU(),
             layers.Dense(1, activation=None)
         ])
 
