@@ -7,16 +7,16 @@ class CPADecoder(Model):
         
         self.decoder = tf.keras.Sequential([
             layers.InputLayer(shape=(input_dim,)),
+            layers.Dense(hidden_size, kernel_initializer='he_normal', kernel_regularizer=regularizers.l2(1e-6)),
+            # layers.BatchNormalization(),
+            layers.ReLU(),
+            layers.Dense(hidden_size // 2, kernel_initializer='he_normal', kernel_regularizer=regularizers.l2(1e-6)),
+            # layers.BatchNormalization(),
+            layers.ReLU(),
             # layers.Dense(hidden_size, kernel_initializer='he_normal', kernel_regularizer=regularizers.l2(1e-6)),
             # layers.BatchNormalization(),
             # layers.ReLU(),
-            layers.Dense(hidden_size, kernel_initializer='he_normal', kernel_regularizer=regularizers.l2(1e-6)),
-            layers.BatchNormalization(),
-            layers.ReLU(),
-            layers.Dense(hidden_size, kernel_initializer='he_normal', kernel_regularizer=regularizers.l2(1e-6)),
-            layers.BatchNormalization(),
-            layers.ReLU(),
-            layers.Dense(output_dim)
+            layers.Dense(output_dim, activation=None)
         ])
         
     def call(self, x):
