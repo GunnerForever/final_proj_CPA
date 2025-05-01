@@ -10,33 +10,18 @@ r2_score = metrics.R2Score()
 
 
 def train_step(model, batch, ae_optimizer, dose_optimizer, adv_optimizer,
-               lambda_adv=5.0, lambda_gp=3.0, n_discriminator_steps=3):
+               lambda_adv=1.0, n_discriminator_steps=1):
     x, pert_idx, dose, cov_idx = batch
 
     with tf.GradientTape(persistent=True) as tape:
-        outputs = model(x, pert_idx, dose, cov_idx, training=True)
+        outputs = model(x, pert_idx, dose, cov_idx, use_grl=True)
+
         recon_loss = reconstruction_loss_fn(x, outputs["x_hat"])
         pert_loss = discriminator_loss_fn(pert_idx, outputs["pert_pred"])
         cov_loss = discriminator_loss_fn(cov_idx, outputs["cov_pred"]) if model.use_covariates else 0.0
         adv_loss = pert_loss + cov_loss
 
-        # z_basal = model.encoder(x)
-        # reversed_z = model.GRL(z_basal)
-        # tape.watch(z_basal)
-
-        # pert_logits = model.pert_discriminator(reversed_z)
-        # gp_pert = tf.reduce_mean(tf.reduce_sum(tf.square(tape.gradient(pert_logits, z_basal)), axis=1))
-        # 
-        # gp_cov = 0.0
-        # if model.use_covariates:
-        #     cov_logits = model.cov_discriminator(reversed_z)
-        #    gp_cov = tf.reduce_mean(tf.reduce_sum(tf.square(tape.gradient(cov_logits, z_basal)), axis=1))
-
-        # gradient_penalty = lambda_gp * (gp_pert + gp_cov)
-
-        total_ae_loss = recon_loss - lambda_adv * adv_loss
-        # total_adv_loss = adv_loss + gradient_penalty
-        total_adv_loss = adv_loss
+        total_ae_loss = recon_loss + lambda_adv * adv_loss
 
     ae_vars = model.encoder.trainable_variables + model.decoder.trainable_variables + [model.pert_embeddings]
     if model.use_covariates:
@@ -44,28 +29,46 @@ def train_step(model, batch, ae_optimizer, dose_optimizer, adv_optimizer,
     ae_grads = tape.gradient(total_ae_loss, ae_vars)
     ae_optimizer.apply_gradients(zip(ae_grads, ae_vars))
 
-    dose_grads = tape.gradient(total_ae_loss, model.dose_encoder.trainable_variables)
-    dose_optimizer.apply_gradients(zip(dose_grads, model.dose_encoder.trainable_variables))
+    # dose_grads = tape.gradient(total_ae_loss, model.dose_encoder.trainable_variables)
+    # dose_optimizer.apply_gradients(zip(dose_grads, model.dose_encoder.trainable_variables))
 
-    adv_vars = model.pert_discriminator.trainable_variables
-    if model.use_covariates:
-        adv_vars += model.cov_discriminator.trainable_variables
     for _ in range(n_discriminator_steps):
-        adv_grads = tape.gradient(total_adv_loss, adv_vars)
-        adv_optimizer.apply_gradients(zip(adv_grads, adv_vars))
+        with tf.GradientTape(persistent=True) as disc_tape:
+            outputs_disc = model(x, pert_idx, dose, cov_idx, use_grl=False)
+
+            pert_logits = outputs_disc["pert_pred"]
+            pert_loss_d = discriminator_loss_fn(pert_idx, pert_logits)
+
+            cov_loss_d = 0.0
+            if model.use_covariates:
+                cov_logits = outputs_disc["cov_pred"]
+                cov_loss_d = discriminator_loss_fn(cov_idx, cov_logits)
+
+            total_disc_loss = pert_loss_d + cov_loss_d
+
+        disc_vars = model.pert_discriminator.trainable_variables
+        if model.use_covariates:
+            disc_vars += model.cov_discriminator.trainable_variables
+        disc_grads = disc_tape.gradient(total_disc_loss, disc_vars)
+        adv_optimizer.apply_gradients(zip(disc_grads, disc_vars))
+
+    acc = tf.keras.metrics.SparseCategoricalAccuracy()
+    acc.update_state(pert_idx, outputs_disc["pert_pred"])
+    print(f"Discriminator accuracy: {acc.result().numpy():.4f}")
 
     return {
-        "total_ae_loss": total_ae_loss.numpy(),
         "reconstruction_loss": recon_loss.numpy(),
         "perturbation_loss": pert_loss.numpy(),
         "covariates_loss": cov_loss.numpy() if model.use_covariates else 0.0,
-        "r2_score": r2_score(x, outputs["x_hat"]).numpy(),
+        "adv_loss": adv_loss.numpy(),
+        "total_ae_loss": total_ae_loss.numpy(),
+        "r2_score": r2_score(x, outputs["x_hat"]).numpy()
     }
 
 
 def test_step(model, batch):
     x, pert_idx, dose, cov_idx = batch
-    outputs = model(x, pert_idx, dose, cov_idx, training=False)
+    outputs = model(x, pert_idx, dose, cov_idx, use_grl=False)
 
     return reconstruction_loss_fn(x, outputs["x_hat"]).numpy(), r2_score(x, outputs["x_hat"]).numpy()
 
@@ -88,7 +91,7 @@ def train(model,
         
         for step, batch in enumerate(train_ds):
             metrics = train_step(model, batch, ae_optimizer, dose_optimizer, adv_optimizer, 
-                                 lambda_adv=5.0, lambda_gp=3.0, n_discriminator_steps=3)
+                                 lambda_adv=5, n_discriminator_steps=n_discriminator_steps)
             if step % 64 == 0:
                 print(f"Step {step}: {metrics}")
         

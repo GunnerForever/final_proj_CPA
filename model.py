@@ -27,13 +27,9 @@ class CPAModel(tf.keras.Model):
             
         self.use_covariates = use_covariates
 
-        self.dose_encoder = tf.keras.Sequential([
-            layers.InputLayer(shape=(1,)),
-            layers.Dense(dose_enc_hidden_size, kernel_initializer='he_normal', kernel_regularizer=tf.keras.regularizers.l2(1e-7)),
-            layers.BatchNormalization(),
-            layers.ReLU(),
-            layers.Dense(1, activation=None)
-        ])
+        # self.dose_encoder = tf.keras.Sequential([
+        #     layers.Dense(1, activation='relu', use_bias=False, kernel_regularizer=tf.keras.regularizers.l2(1e-7)),
+        # ])
 
         self.pert_discriminator = CPADiscriminator(latent_size, num_perts, discriminator_hidden_size)
         if use_covariates:
@@ -44,26 +40,29 @@ class CPAModel(tf.keras.Model):
         self.GRL = GradientReversalLayer(lambda_=1.0)
         
         
-    def call(self, x, pert_idx, dose, cov_idx=None, training=False):
+    def call(self, x, pert_idx, dose, cov_idx=None, use_grl=False):
         z_basal = self.encoder(x)
-
         outputs = {}
 
-        if training:
-            reversed_z_basal = self.GRL(z_basal)
-            outputs["pert_pred"] = self.pert_discriminator(reversed_z_basal)
-            if self.use_covariates and cov_idx is not None:
-                outputs["cov_pred"] = self.cov_discriminator(reversed_z_basal)
-        
+        if use_grl:
+            z_for_disc = self.GRL(z_basal + tf.random.normal(tf.shape(z_basal), stddev=0.05))
+        else:
+            z_for_disc = z_basal
+    
+        outputs["pert_pred"] = self.pert_discriminator(z_for_disc)
+        if self.use_covariates and cov_idx is not None:
+            outputs["cov_pred"] = self.cov_discriminator(z_for_disc)
+
         pert_vec = tf.nn.embedding_lookup(self.pert_embeddings, pert_idx)
-        scaled_dose = self.dose_encoder(tf.expand_dims(dose, axis=-1))
-        scaled_pert = tf.squeeze(scaled_dose, axis=-1)[:, tf.newaxis] * pert_vec
+        # scaled_dose = self.dose_encoder(tf.expand_dims(dose, -1))
+        # scaled_pert = tf.squeeze(scaled_dose, -1)[:, tf.newaxis] * pert_vec
+        scaled_pert = dose[:, tf.newaxis] * pert_vec
 
         z = z_basal + scaled_pert
         if self.use_covariates and cov_idx is not None:
             cov_vec = tf.nn.embedding_lookup(self.cov_embeddings, cov_idx)
             z = z + cov_vec
-        
+
         x_hat = self.decoder(z)
         outputs["x_hat"] = x_hat
 
